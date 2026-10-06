@@ -34,17 +34,37 @@ jobs:
 
       - name: Record environment
         run: |
-          echo "commit=$(git rev-parse HEAD)"
-          rustc --version --verbose
-          cargo --version
-          qemu-system-x86_64 --version
-          dpkg-query -W -f='ovmf=${Version}\n' ovmf
-          echo "ImageOS=${ImageOS:-unknown}"
-          echo "ImageVersion=${ImageVersion:-unknown}"
+          {
+            echo "commit=$(git rev-parse HEAD)"
+            rustc --version --verbose
+            cargo --version
+            qemu-system-x86_64 --version
+            dpkg-query -W -f='ovmf=${Version}\n' ovmf
+            echo "ImageOS=${ImageOS:-unknown}"
+            echo "ImageVersion=${ImageVersion:-unknown}"
+          } | tee "uefi-env-${{ matrix.rust }}.txt"
 
       - name: Build UEFI binary separately
+        id: build
+        shell: bash
         run: |
-          cargo build --release --target x86_64-unknown-uefi             --manifest-path crates/hologram-efi/Cargo.toml
+          set +e
+          set -o pipefail
+          cargo build --release --target x86_64-unknown-uefi             --manifest-path crates/hologram-efi/Cargo.toml             2>&1 | tee "uefi-build-${{ matrix.rust }}.log"
+          status=${PIPESTATUS[0]}
+          echo "exit_code=${status}" >> "$GITHUB_OUTPUT"
+          exit "${status}"
 
       - name: Boot exact repository witness
+        if: steps.build.outcome == 'success'
         run: ./scripts/uefi-boot-test.sh
+
+      - name: Upload diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: uefi-diagnostic-rust-${{ matrix.rust }}
+          path: |
+            uefi-env-${{ matrix.rust }}.txt
+            uefi-build-${{ matrix.rust }}.log
+          if-no-files-found: error
