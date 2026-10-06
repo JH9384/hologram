@@ -11,12 +11,26 @@ permissions:
 
 jobs:
   uefi-drift:
-    name: UEFI witness · Rust ${{ matrix.rust }}
+    name: UEFI witness · ${{ matrix.label }}
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
-        rust: ["1.98.1", "1.99.0"]
+        include:
+          - label: Rust 1.98.1 baseline
+            rust: "1.98.1"
+            rustflags: ""
+            artifact: "1.98.1"
+          - label: Rust 1.99.0 unmodified
+            rust: "1.99.0"
+            rustflags: ""
+            artifact: "1.99.0"
+          - label: Rust 1.99.0 disable wcslen idiom
+            rust: "1.99.0"
+            rustflags: "-C llvm-args=-disable-loop-idiom-wcslen"
+            artifact: "1.99.0-no-wcslen-idiom"
+    env:
+      RUSTFLAGS: ${{ matrix.rustflags }}
     steps:
       - uses: actions/checkout@v6
 
@@ -42,7 +56,8 @@ jobs:
             dpkg-query -W -f='ovmf=${Version}\n' ovmf
             echo "ImageOS=${ImageOS:-unknown}"
             echo "ImageVersion=${ImageVersion:-unknown}"
-          } | tee "uefi-env-${{ matrix.rust }}.txt"
+            echo "RUSTFLAGS=${RUSTFLAGS}"
+          } | tee "uefi-env-${{ matrix.artifact }}.txt"
 
       - name: Build UEFI binary separately
         id: build
@@ -50,7 +65,7 @@ jobs:
         run: |
           set +e
           set -o pipefail
-          cargo build --release --target x86_64-unknown-uefi             --manifest-path crates/hologram-efi/Cargo.toml             2>&1 | tee "uefi-build-${{ matrix.rust }}.log"
+          cargo build --release --target x86_64-unknown-uefi             --manifest-path crates/hologram-efi/Cargo.toml             2>&1 | tee "uefi-build-${{ matrix.artifact }}.log"
           status=${PIPESTATUS[0]}
           echo "exit_code=${status}" >> "$GITHUB_OUTPUT"
           exit "${status}"
@@ -63,8 +78,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: uefi-diagnostic-rust-${{ matrix.rust }}
+          name: uefi-diagnostic-${{ matrix.artifact }}
           path: |
-            uefi-env-${{ matrix.rust }}.txt
-            uefi-build-${{ matrix.rust }}.log
+            uefi-env-${{ matrix.artifact }}.txt
+            uefi-build-${{ matrix.artifact }}.log
           if-no-files-found: error
