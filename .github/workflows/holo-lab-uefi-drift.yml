@@ -1,0 +1,50 @@
+name: Holo Lab UEFI drift diagnostic
+
+on:
+  push:
+    branches:
+      - holo-lab/uefi-drift-diagnostic-2026-10-06
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  uefi-drift:
+    name: UEFI witness · Rust ${{ matrix.rust }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        rust: ["1.98.1", "1.99.0"]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup explicit Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+          targets: x86_64-unknown-uefi
+
+      - name: Install QEMU + OVMF
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list                      /etc/apt/sources.list.d/azure-cli.list                      /etc/apt/sources.list.d/azure-cli.sources || true
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 ovmf
+
+      - name: Record environment
+        run: |
+          echo "commit=$(git rev-parse HEAD)"
+          rustc --version --verbose
+          cargo --version
+          qemu-system-x86_64 --version
+          dpkg-query -W -f='ovmf=${Version}\n' ovmf
+          echo "ImageOS=${ImageOS:-unknown}"
+          echo "ImageVersion=${ImageVersion:-unknown}"
+
+      - name: Build UEFI binary separately
+        run: |
+          cargo build --release --target x86_64-unknown-uefi             --manifest-path crates/hologram-efi/Cargo.toml
+
+      - name: Boot exact repository witness
+        run: ./scripts/uefi-boot-test.sh
